@@ -1,0 +1,79 @@
+name: Exact WSL virtio-sound kernel build
+
+on:
+  push:
+    branches:
+      - codex/validate-virtio-sound-kernel
+
+permissions:
+  contents: read
+
+concurrency:
+  group: exact-kernel-build-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-x64:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      EXPECTED_SOURCE_COMMIT: daa7ac6223800f09741e1d6cb165fc2cca8a638d
+      SOURCE_REPOSITORY: whatisyourname0/WSL2-Linux-Kernel
+      SOURCE_REF: codex/enable-virtio-sound-for-wsl
+      VALIDATION_HARNESS_REPOSITORY: ${{ github.repository }}
+      VALIDATION_HARNESS_REF: ${{ github.ref }}
+      VALIDATION_HARNESS_COMMIT: ${{ github.sha }}
+      JOBS: "2"
+    steps:
+      - name: Checkout validation harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            .github
+            kernel-validation
+
+      - name: Create artifact directory
+        run: mkdir -p artifacts
+
+      - name: Checkout submitted kernel commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: whatisyourname0/WSL2-Linux-Kernel
+          ref: daa7ac6223800f09741e1d6cb165fc2cca8a638d
+          path: source
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Record runner capacity
+        run: |
+          df -h "$GITHUB_WORKSPACE" "$RUNNER_TEMP"
+          free -h
+          nproc
+
+      - name: Install kernel and packaging tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            bc bison build-essential ca-certificates cpio dwarves e2fsprogs \
+            flex git kmod libcap-dev libdw-dev libelf-dev libncurses-dev \
+            libnuma-dev libperl-dev libpfm4-dev libpython3-dev libslang2-dev \
+            libssl-dev libunwind-dev libzstd-dev make perl python3 qemu-utils \
+            rsync xz-utils zstd
+
+      - name: Build and package exact submitted config
+        env:
+          SOURCE_DIR: ${{ github.workspace }}/source
+          BUILD_ROOT: ${{ runner.temp }}/kernel-exact-build
+          OUTPUT_DIR: ${{ github.workspace }}/artifacts
+        run: bash kernel-validation/build-and-package.sh
+
+      - name: Upload build evidence
+        if: always() && hashFiles('artifacts/**') != ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: exact-wsl-kernel-daa7ac6-${{ github.run_id }}
+          path: artifacts/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
